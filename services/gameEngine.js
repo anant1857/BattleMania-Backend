@@ -29,7 +29,6 @@ export const setupGameSocket = (io) => {
       socket.join(data.roomId);
       console.log(`Room ${data.roomId} created`);
 
-      // CRITICAL FIX: Emit initial room state after creation
       try {
         const Room = await import("../models/Room.js").then((m) => m.default)
         const dbRoom = await Room.findById(data.roomId)
@@ -50,7 +49,6 @@ export const setupGameSocket = (io) => {
 
       const room = gameRooms.get(roomId)
       if (room) {
-        // Only add if not already in the map
         if (!room.players.has(playerId)) {
           room.players.set(playerId, {
             id: playerId,
@@ -68,7 +66,6 @@ export const setupGameSocket = (io) => {
           dbRoom.players.push(playerId)
           await dbRoom.save()
         }
-        // ALWAYS populate before emitting
         if (dbRoom) {
           await dbRoom.populate("players", "username")
           await dbRoom.populate("host", "username")
@@ -84,7 +81,6 @@ export const setupGameSocket = (io) => {
       const { roomId, playerId } = data
       const room = gameRooms.get(roomId)
       
-      // CRITICAL FIX: Check if player exists in room first
       if (!room) {
         console.error(`Room ${roomId} not found in gameRooms`)
         return
@@ -105,18 +101,13 @@ export const setupGameSocket = (io) => {
         if (dbRoom) {
           const isCurrentlyReady = dbRoom.readyPlayers.some(id => id.toString() === playerId.toString())
           
-          // CRITICAL FIX: Properly sync the ready state
           if (player.isReady && !isCurrentlyReady) {
-            // Player wants to be ready and isn't already
             dbRoom.readyPlayers.push(playerId)
           } else if (!player.isReady && isCurrentlyReady) {
-            // Player wants to be not ready and currently is
             dbRoom.readyPlayers = dbRoom.readyPlayers.filter(id => id.toString() !== playerId.toString())
           }
           
           await dbRoom.save()
-          
-          // ALWAYS populate before emitting
           await dbRoom.populate("players", "username")
           await dbRoom.populate("host", "username")
           await dbRoom.populate("readyPlayers", "username")
@@ -139,7 +130,6 @@ export const setupGameSocket = (io) => {
         room.startTime = Date.now()
         room.units = []
         
-        // Initialize scores for all players
         room.players.forEach((player) => {
           room.scores[player.id] = 0
         })
@@ -151,6 +141,7 @@ export const setupGameSocket = (io) => {
           const dbRoom = await Room.findById(roomId)
           if (dbRoom) {
             dbRoom.status = "playing"
+            dbRoom.startedAt = new Date()
             await dbRoom.save()
             await dbRoom.populate("players", "username")
             await dbRoom.populate("host", "username")
@@ -195,7 +186,7 @@ export const setupGameSocket = (io) => {
 }
 
 const startGameLoop = (io, roomId, room) => {
-  const interval = setInterval(() => {
+  const interval = setInterval(async () => {
     if (!room.gameActive) {
       clearInterval(interval)
       return
@@ -204,11 +195,60 @@ const startGameLoop = (io, roomId, room) => {
     const elapsed = (Date.now() - room.startTime) / 1000
     if (elapsed > GAME_DURATION) {
       room.gameActive = false
-      const winner = Object.entries(room.scores).reduce((a, b) => (a[1] > b[1] ? a : b))
-      io.to(roomId).emit("game_ended", {
-        winner: winner[0],
+      
+      // Determine winner
+      const scores = Object.entries(room.scores)
+      const winner = scores.reduce((a, b) => (a[1] > b[1] ? a : b))
+      const isDraw = scores.every(([, score]) => score === winner[1])
+      
+      const gameEndData = {
+        winner: isDraw ? null : winner[0],
         scores: room.scores,
-      })
+        isDraw,
+      }
+
+      // Save match to database
+      try {
+        const Match = await import("../models/Match.js").then((m) => m.default)
+        const User = await import("../models/User.js").then((m) => m.default)
+        const Room = await import("../models/Room.js").then((m) => m.default)
+
+        const dbRoom = await Room.findById(roomId)
+        if (dbRoom) {
+          // Create match record
+          const match = new Match({
+            room: roomId,
+            players: Array.from(room.players.keys()),
+            winner: isDraw ? null : winner[0],
+            scores: room.scores,
+            duration: Math.floor(elapsed),
+            endedAt: new Date(),
+          })
+          await match.save()
+
+          // Update room status
+          dbRoom.status = "finished"
+          dbRoom.finishedAt = new Date()
+          await dbRoom.save()
+
+          // Update user statistics
+          for (const [playerId, score] of Object.entries(room.scores)) {
+            await User.findByIdAndUpdate(playerId, {
+              $inc: {
+                gamesPlayed: 1,
+                totalScore: score,
+                wins: playerId === winner[0] && !isDraw ? 1 : 0,
+                losses: playerId !== winner[0] && !isDraw ? 1 : 0,
+                draws: isDraw ? 1 : 0,
+              },
+            })
+          }
+        }
+      } catch (err) {
+        console.error("Error saving match data:", err)
+      }
+
+      io.to(roomId).emit("game_ended", gameEndData)
       clearInterval(interval)
       return
     }

@@ -9,6 +9,7 @@ import authRoutes from "./routes/auth.js"
 import roomRoutes from "./routes/rooms.js"
 import userRoutes from "./routes/users.js"
 import { setupGameSocket } from "./services/gameEngine.js"
+import matchRoutes from "./routes/match.js"
 
 dotenv.config()
 
@@ -39,6 +40,7 @@ mongoose
 app.use("/api/auth", authRoutes)
 app.use("/api/rooms", roomRoutes)
 app.use("/api/users", userRoutes)
+app.use("/api/matches", matchRoutes)
 
 app.get("/health", (req, res) => {
   res.json({ status: "Server running" })
