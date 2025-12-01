@@ -10,7 +10,7 @@ import roomRoutes from "./routes/rooms.js"
 import userRoutes from "./routes/users.js"
 import { setupGameSocket } from "./services/gameEngine.js"
 import matchRoutes from "./routes/match.js"
-
+import adminRoutes from "./routes/admin.js"
 dotenv.config()
 
 const app = express()
@@ -41,6 +41,7 @@ app.use("/api/auth", authRoutes)
 app.use("/api/rooms", roomRoutes)
 app.use("/api/users", userRoutes)
 app.use("/api/matches", matchRoutes)
+app.use("/api/admin", adminRoutes)
 
 app.get("/health", (req, res) => {
   res.json({ status: "Server running" })
