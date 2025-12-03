@@ -12,6 +12,7 @@ import { setupGameSocket } from "./services/gameEngine.js"
 import matchRoutes from "./routes/match.js"
 import adminRoutes from "./routes/admin.js"
 dotenv.config()
+console.log("CLIENT_URL is:", process.env.CLIENT_URL);
 
 const app = express()
 const httpServer = createServer(app)
@@ -29,6 +30,9 @@ app.use(
   }),
 )
 app.use(express.json())
+
+
+
 
 // MongoDB Connection
 mongoose
